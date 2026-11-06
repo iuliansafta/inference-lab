@@ -2,6 +2,8 @@
 
 ## bf16
 
+Measured with `--max-model-len 8192`. The later setting of 32768 lowered the KV cache from 45,136 to 45,120 tokens. This table wasn't re-run under it.
+
 | Concurrency | Req/s | Output tok/s | TTFT p50 (ms) | TTFT p95 (ms) | TPOT p95 (ms) | E2E p95 (s) | KV cache peak | Running peak | Waiting peak | Preemptions | GPU util | Failed |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | 1 | 0.07 | 18 | 167 | 169 | 56.3 | 14.5 | 2% | 1 | 0 | 0 | 91% | 0 |
