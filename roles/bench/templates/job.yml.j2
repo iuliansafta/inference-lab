@@ -1,0 +1,53 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bench-c{{ bench_c }}
+  namespace: inference
+  labels:
+    app: bench
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: bench
+    spec:
+      restartPolicy: Never
+      # The vLLM CLI is built and tested on GPU hosts. It only sends HTTP here,
+      # but running it under runc, with no driver libraries, is untested.
+      runtimeClassName: nvidia
+      containers:
+        - name: bench
+          image: vllm/vllm-openai:{{ vllm_version }}
+          command: [vllm, bench, serve]
+          args: {{ ['--backend', 'openai',
+                    '--base-url', 'http://vllm.inference.svc:8000',
+                    '--model', vllm_model,
+                    '--dataset-name', 'random',
+                    '--input-len', bench_input_len | string,
+                    '--output-len', bench_output_len | string,
+                    '--ignore-eos',
+                    '--num-prompts', [bench_c * bench_prompts_per_slot, bench_min_prompts] | max | string,
+                    '--max-concurrency', bench_c | string,
+                    '--percentile-metrics', 'ttft,tpot,e2el',
+                    '--metric-percentiles', '50,95,99',
+                    '--save-result',
+                    '--result-dir', '/results',
+                    '--result-filename', 'c' ~ bench_c ~ '.json'] | to_json }}
+          env:
+            - name: HF_HOME
+              value: /hf
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /hf
+            - name: results
+              mountPath: /results
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: {{ lab_data }}/hf
+            type: Directory
+        - name: results
+          hostPath:
+            path: {{ lab_data }}/results/{{ vllm_variant }}
+            type: Directory

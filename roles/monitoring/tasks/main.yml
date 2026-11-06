@@ -1,0 +1,91 @@
+---
+# GPU pods select the NVIDIA runtime explicitly; the node default stays runc.
+- name: Install the NVIDIA device plugin
+  kubernetes.core.helm:
+    name: nvidia-device-plugin
+    chart_repo_url: https://nvidia.github.io/k8s-device-plugin
+    chart_ref: nvidia-device-plugin
+    chart_version: "{{ nvidia_device_plugin_version }}"
+    release_namespace: nvidia
+    create_namespace: true
+    wait: true
+    values:
+      runtimeClassName: nvidia
+
+# Selectors are opened up so that ServiceMonitors and rules from other releases
+# (dcgm-exporter, the vllm role) are picked up without a `release` label.
+# A 5s scrape interval keeps a two-minute benchmark run at a useful resolution.
+- name: Install kube-prometheus-stack
+  kubernetes.core.helm:
+    name: kube-prometheus-stack
+    chart_repo_url: https://prometheus-community.github.io/helm-charts
+    chart_ref: kube-prometheus-stack
+    chart_version: "{{ kube_prometheus_stack_version }}"
+    release_namespace: monitoring
+    create_namespace: true
+    wait: true
+    # CRDs, the operator, Prometheus and Grafana on a cold node can outlast the 5m default.
+    timeout: 15m0s
+    values:
+      prometheus:
+        service:
+          type: NodePort
+          nodePort: "{{ node_ports.prometheus }}"
+        prometheusSpec:
+          scrapeInterval: 5s
+          evaluationInterval: 15s
+          retention: 7d
+          serviceMonitorSelectorNilUsesHelmValues: false
+          ruleSelectorNilUsesHelmValues: false
+      grafana:
+        adminPassword: >-
+          {{ lookup('ansible.builtin.password', playbook_dir ~ '/../.secrets/grafana-admin',
+                    length=24, chars=['ascii_letters', 'digits']) }}
+        service:
+          type: NodePort
+          nodePort: "{{ node_ports.grafana }}"
+        dashboardProviders:
+          dashboardproviders.yaml:
+            apiVersion: 1
+            providers:
+              - name: gpu
+                orgId: 1
+                folder: GPU
+                type: file
+                options:
+                  path: /var/lib/grafana/dashboards/gpu
+        dashboards:
+          gpu:
+            dcgm:
+              gnetId: 12239
+              revision: 2
+              datasource: Prometheus
+
+- name: Install the DCGM exporter
+  kubernetes.core.helm:
+    name: dcgm-exporter
+    chart_repo_url: https://nvidia.github.io/dcgm-exporter/helm-charts
+    chart_ref: dcgm-exporter
+    chart_version: "{{ dcgm_exporter_version }}"
+    release_namespace: nvidia
+    wait: true
+    values:
+      runtimeClassName: nvidia
+      serviceMonitor:
+        enabled: true
+        interval: 5s
+
+# vLLM's own dashboard, vendored from examples/observability/prometheus_grafana
+# at the pinned vLLM tag. The Grafana sidecar loads any ConfigMap with this label.
+- name: Load the vLLM dashboard
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: vllm-dashboard
+        namespace: monitoring
+        labels:
+          grafana_dashboard: "1"
+      data:
+        vllm.json: "{{ lookup('ansible.builtin.file', 'vllm-dashboard.json') }}"

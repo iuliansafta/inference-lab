@@ -1,0 +1,120 @@
+---
+# Checks the lab end to end: GPU, Kubernetes scheduling, the model answering,
+# and Prometheus scraping both vLLM and the GPU. Read-only. Exits non-zero
+# when any check fails.
+- name: Preflight
+  import_playbook: preflight.yml
+
+- name: Verify the inference lab
+  hosts: lab
+  gather_facts: false
+
+  tasks:
+    - name: Start with an empty result set
+      ansible.builtin.set_fact:
+        verify_results: []
+
+    - name: Run the read-only probes
+      ansible.builtin.command: "{{ item.value }}"
+      loop: "{{ verify_probes | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: verify_probe
+      changed_when: false
+      failed_when: false
+      vars:
+        verify_probes:
+          driver: nvidia-smi -L
+          gpu_allocatable: >-
+            k3s kubectl get nodes -o 'jsonpath={.items[0].status.allocatable.nvidia\.com/gpu}'
+          runtime_class: k3s kubectl get runtimeclass nvidia -o name
+          served_variant: >-
+            k3s kubectl -n inference get deployment vllm
+            -o 'jsonpath={.spec.template.metadata.labels.variant}'
+          ready_replicas: >-
+            k3s kubectl -n inference get deployment vllm -o 'jsonpath={.status.readyReplicas}'
+
+    - name: Index the probe output
+      ansible.builtin.set_fact:
+        verify_out: >-
+          {{ dict(verify_probe.results | map(attribute='item.key')
+                  | zip(verify_probe.results | map(attribute='stdout'))) }}
+
+    - name: Ask the model a question
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ node_ports.vllm }}/v1/chat/completions"
+        method: POST
+        body_format: json
+        body:
+          model: "{{ vllm_model }}"
+          max_tokens: 16
+          messages:
+            - role: user
+              content: Name the capital of Switzerland in one word.
+        timeout: 60
+      register: verify_chat
+      failed_when: false
+
+    - name: Ask Prometheus for vLLM and GPU series
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ node_ports.prometheus }}/api/v1/query?query={{ item | urlencode }}"
+        return_content: true
+      loop:
+        - vllm:kv_cache_usage_perc
+        - DCGM_FI_DEV_GPU_UTIL
+      register: verify_prom
+      failed_when: false
+
+    - name: Record the results
+      ansible.builtin.set_fact:
+        verify_results:
+          - check: nvidia-smi sees the GPU
+            status: "{{ 'pass' if 'GPU 0' in verify_out.driver else 'FAIL' }}"
+          - check: the node advertises one nvidia.com/gpu
+            status: "{{ 'pass' if verify_out.gpu_allocatable == '1' else 'FAIL' }}"
+          - check: the nvidia RuntimeClass exists
+            status: "{{ 'pass' if verify_out.runtime_class == 'runtimeclass.node.k8s.io/nvidia' else 'FAIL' }}"
+          - check: vLLM serves the {{ vllm_variant }} variant
+            status: "{{ 'pass' if verify_out.served_variant == vllm_variant else 'FAIL' }}"
+            detail: "deployed: {{ verify_out.served_variant | default('none', true) }}"
+          - check: vLLM has a ready replica
+            status: "{{ 'pass' if verify_out.ready_replicas == '1' else 'FAIL' }}"
+          - check: the model answers a chat completion
+            status: "{{ 'pass' if verify_chat.status | default(0) == 200 else 'FAIL' }}"
+            detail: >-
+              {{ verify_chat.json.choices[0].message.content | default(verify_chat.msg | default('')) }}
+          - check: Prometheus scrapes vLLM
+            status: "{{ 'pass' if verify_prom.results[0].json.data.result | default([]) | length > 0 else 'FAIL' }}"
+          - check: Prometheus scrapes the GPU
+            status: "{{ 'pass' if verify_prom.results[1].json.data.result | default([]) | length > 0 else 'FAIL' }}"
+
+    # vLLM logs how many tokens of KV cache it allocated and how many
+    # max-length requests that holds. The benchmark write-up starts here.
+    - name: Read vLLM's KV cache sizing from its log
+      ansible.builtin.shell: >-
+        set -o pipefail;
+        k3s kubectl -n inference logs deployment/vllm
+        | grep -E 'KV cache size|Maximum concurrency' | tail -2
+      args:
+        executable: /bin/bash
+      register: verify_kv
+      changed_when: false
+      failed_when: false
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >-
+          {{ verify_results | map(attribute='check') | zip(verify_results | map(attribute='status'))
+             | map('join', ' ... ') | list + verify_kv.stdout_lines }}
+
+    - name: Detail for checks that did not pass
+      ansible.builtin.debug:
+        msg: "{{ verify_results | selectattr('status', 'ne', 'pass') | list }}"
+      when: verify_results | selectattr('status', 'ne', 'pass') | list | length > 0
+
+    - name: Fail when any check failed
+      ansible.builtin.assert:
+        that:
+          - verify_results | selectattr('status', 'equalto', 'FAIL') | list | length == 0
+        fail_msg: The lab did not verify. See the failing checks above.
+        success_msg: The lab verifies end to end.

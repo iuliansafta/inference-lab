@@ -1,0 +1,32 @@
+---
+- name: Require the deployed variant to be the one being benchmarked
+  kubernetes.core.k8s_info:
+    kind: Deployment
+    name: vllm
+    namespace: inference
+  register: bench_deployment
+  failed_when: >-
+    bench_deployment.resources | length == 0
+    or bench_deployment.resources[0].spec.template.metadata.labels.variant != vllm_variant
+
+- name: Create the results directory on the host
+  ansible.builtin.file:
+    path: "{{ lab_data }}/results/{{ vllm_variant }}"
+    state: directory
+    mode: "0755"
+
+- name: Create the results directory in the repository
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../results/{{ vllm_variant }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+
+- name: Run one benchmark per concurrency level
+  ansible.builtin.include_tasks: run.yml
+  loop: "{{ bench_concurrency }}"
+  loop_control:
+    loop_var: bench_c

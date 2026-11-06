@@ -1,0 +1,4 @@
+write-kubeconfig-mode: "0600"
+# Services are reached through NodePorts and an SSH tunnel; no ingress needed.
+disable:
+  - traefik

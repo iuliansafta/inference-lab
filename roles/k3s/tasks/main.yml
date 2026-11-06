@@ -1,0 +1,87 @@
+---
+- name: Create the k3s configuration directory
+  ansible.builtin.file:
+    path: /etc/rancher/k3s
+    state: directory
+    mode: "0755"
+
+- name: Write the k3s configuration
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: /etc/rancher/k3s/config.yaml
+    mode: "0644"
+  notify: Restart k3s
+
+- name: Read the installed k3s version
+  ansible.builtin.command: k3s --version
+  register: k3s_installed
+  changed_when: false
+  failed_when: false
+
+# The installer comes from the same tag as the binary it installs.
+- name: Install k3s
+  when: k3s_version not in k3s_installed.stdout | default('')
+  block:
+    - name: Download the k3s installer
+      ansible.builtin.get_url:
+        url: "https://raw.githubusercontent.com/k3s-io/k3s/{{ k3s_version | urlencode }}/install.sh"
+        dest: /usr/local/bin/k3s-install.sh
+        mode: "0755"
+        force: true
+
+    - name: Run the k3s installer
+      ansible.builtin.command: /usr/local/bin/k3s-install.sh
+      environment:
+        INSTALL_K3S_VERSION: "{{ k3s_version }}"
+      changed_when: true
+
+- name: Apply a configuration change before checking the node
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the node to be ready
+  ansible.builtin.command: k3s kubectl wait --for=condition=Ready node --all --timeout=180s
+  changed_when: false
+
+# k3s adds the NVIDIA runtime to containerd only when it finds the toolkit's
+# binaries at startup. Without it, GPU pods fail with an unknown RuntimeClass.
+- name: Require the NVIDIA runtime in containerd
+  ansible.builtin.command: grep -rl nvidia /var/lib/rancher/k3s/agent/etc/containerd/
+  changed_when: false
+
+- name: Install helm
+  block:
+    - name: Create the helm release directory
+      ansible.builtin.file:
+        path: /opt/helm-{{ helm_version }}
+        state: directory
+        mode: "0755"
+
+    - name: Unpack the pinned helm release
+      ansible.builtin.unarchive:
+        src: "https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz"
+        dest: /opt/helm-{{ helm_version }}
+        remote_src: true
+        creates: /opt/helm-{{ helm_version }}/linux-amd64/helm
+
+    - name: Link helm onto the PATH
+      ansible.builtin.file:
+        src: /opt/helm-{{ helm_version }}/linux-amd64/helm
+        dest: /usr/local/bin/helm
+        state: link
+
+- name: Install the Python Kubernetes client for the kubernetes.core modules
+  block:
+    - name: Install venv support
+      ansible.builtin.apt:
+        name: python3-venv
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install the client into its own virtualenv
+      ansible.builtin.pip:
+        name:
+          - kubernetes=={{ kubernetes_client_version }}
+          - jsonpatch
+          - requests-oauthlib
+        virtualenv: "{{ k8s_venv }}"
+        virtualenv_command: python3 -m venv

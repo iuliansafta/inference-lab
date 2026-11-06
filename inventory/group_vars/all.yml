@@ -1,0 +1,40 @@
+---
+k3s_version: v1.37.1+k3s1
+helm_version: v3.22.1
+# The Python client that the kubernetes.core modules need on the host.
+kubernetes_client_version: "37.0.1"
+nvidia_device_plugin_version: "0.20.1"
+dcgm_exporter_version: "4.8.4"
+kube_prometheus_stack_version: "92.17.1"
+vllm_version: v0.32.0
+
+k8s_venv: /opt/k8s-venv
+k8s_kubeconfig: /etc/rancher/k3s/k3s.yaml
+lab_data: /var/lib/inference-lab
+
+vllm_model: mistralai/Mistral-7B-Instruct-v0.3
+# Mistral's default is 32k tokens. One sequence that long would claim most of
+# the KV cache left on a 24 GB card, so the server is capped at 8k.
+vllm_max_model_len: 8192
+vllm_gpu_memory_utilization: 0.90
+# Extra `vllm serve` flags per serving configuration. Pick one with
+# `make apply VARIANT=fp8`; results land in results/<variant>/.
+vllm_variants:
+  bf16: []
+  fp8: [--quantization, fp8]
+  fp8-kv: [--kv-cache-dtype, fp8]
+vllm_variant: bf16
+
+# 64 and 128 are there to fill the KV cache. In bf16 my estimate is about 40k
+# tokens of cache, so roughly 50 requests of 512 + 256 tokens at once. vLLM
+# logs the real figure at startup and `make verify` prints it.
+bench_concurrency: [1, 8, 32, 64, 128]
+bench_input_len: 512
+bench_output_len: 256
+bench_prompts_per_slot: 6
+bench_min_prompts: 32
+
+node_ports:
+  vllm: 30800
+  grafana: 30300
+  prometheus: 30090

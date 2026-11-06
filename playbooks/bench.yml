@@ -1,0 +1,13 @@
+---
+- name: Preflight
+  import_playbook: preflight.yml
+
+- name: Benchmark the deployed variant
+  hosts: lab
+  gather_facts: false
+  vars:
+    ansible_python_interpreter: "{{ k8s_venv }}/bin/python"
+  environment:
+    K8S_AUTH_KUBECONFIG: "{{ k8s_kubeconfig }}"
+  roles:
+    - bench

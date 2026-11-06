@@ -1,0 +1,144 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: inference
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: inference
+  labels:
+    app: vllm
+spec:
+  replicas: 1
+  # One GPU: the old pod must release it before the new one can start.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+        variant: {{ vllm_variant }}
+    spec:
+      runtimeClassName: nvidia
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:{{ vllm_version }}
+          args: {{ ([vllm_model,
+                     '--max-model-len', vllm_max_model_len | string,
+                     '--gpu-memory-utilization', vllm_gpu_memory_utilization | string]
+                    + vllm_variants[vllm_variant]) | to_json }}
+          env:
+            - name: HF_HOME
+              value: /hf
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          # The first start downloads about 15 GB of weights.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 180
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /hf
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: {{ lab_data }}/hf
+            type: DirectoryOrCreate
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  namespace: inference
+  labels:
+    app: vllm
+spec:
+  type: NodePort
+  selector:
+    app: vllm
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      nodePort: {{ node_ports.vllm }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vllm
+  namespace: inference
+spec:
+  selector:
+    matchLabels:
+      app: vllm
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 5s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: vllm
+  namespace: inference
+spec:
+  groups:
+    - name: vllm
+      rules:
+        - alert: VLLMDown
+          expr: absent(up{namespace="inference", service="vllm"} == 1)
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: The vLLM server is not being scraped.
+        - alert: VLLMRequestsQueueing
+          expr: max(vllm:num_requests_waiting) > 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ '{{ $value }}' }} requests have waited for a batch slot for 2 minutes."
+        - alert: VLLMKVCacheNearlyFull
+          expr: max(vllm:kv_cache_usage_perc) > 0.9
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: The KV cache has been over 90% full for 2 minutes.
+        - alert: VLLMPreempting
+          expr: sum(increase(vllm:num_preemptions_total[5m])) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: vLLM preempted running requests to free KV cache in the last 5 minutes.
+        - alert: GPUHot
+          expr: max(DCGM_FI_DEV_GPU_TEMP) > 85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The GPU has been above 85°C for 5 minutes ({{ '{{ $value }}' }}°C)."

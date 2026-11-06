@@ -1,0 +1,21 @@
+---
+- name: Preflight
+  import_playbook: preflight.yml
+
+- name: Prepare the GPU host
+  hosts: lab
+  roles:
+    - nvidia
+    - k3s
+
+# The kubernetes.core modules need the Python Kubernetes client, which the k3s
+# role installs into its own virtualenv.
+- name: Deploy monitoring and the model server
+  hosts: lab
+  vars:
+    ansible_python_interpreter: "{{ k8s_venv }}/bin/python"
+  environment:
+    K8S_AUTH_KUBECONFIG: "{{ k8s_kubeconfig }}"
+  roles:
+    - monitoring
+    - vllm

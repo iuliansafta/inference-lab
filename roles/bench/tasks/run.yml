@@ -1,0 +1,89 @@
+---
+- name: Remove the previous job at concurrency {{ bench_c }}
+  kubernetes.core.k8s:
+    state: absent
+    kind: Job
+    name: bench-c{{ bench_c }}
+    namespace: inference
+    delete_options:
+      propagationPolicy: Foreground
+    wait: true
+
+- name: Record the start time
+  ansible.builtin.set_fact:
+    bench_started: "{{ now(fmt='%s') | int }}"
+    bench_server: {}
+
+- name: Start the benchmark at concurrency {{ bench_c }}
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'job.yml.j2') | from_yaml }}"
+
+- name: Wait for the benchmark to finish
+  kubernetes.core.k8s_info:
+    kind: Job
+    name: bench-c{{ bench_c }}
+    namespace: inference
+  register: bench_job
+  until: >-
+    (bench_job.resources[0].status.succeeded | default(0))
+    + (bench_job.resources[0].status.failed | default(0)) > 0
+  retries: 360
+  delay: 10
+
+- name: Stop with the job's log if the benchmark failed
+  when: bench_job.resources[0].status.succeeded | default(0) == 0
+  block:
+    - name: Read the benchmark log
+      kubernetes.core.k8s_log:
+        namespace: inference
+        label_selectors: ["job-name=bench-c{{ bench_c }}"]
+      register: bench_log
+
+    - name: Fail with the end of the log
+      ansible.builtin.fail:
+        msg: "{{ bench_log.log_lines[-40:] }}"
+
+# The window covers this run only, so the peaks below belong to it.
+- name: Query server-side figures for the run from Prometheus
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ node_ports.prometheus }}/api/v1/query?query={{ item.value | urlencode }}"
+    return_content: true
+  loop: "{{ bench_queries | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: bench_prom
+  vars:
+    bench_window: "{{ (now(fmt='%s') | int) - (bench_started | int) }}s"
+    bench_queries:
+      kv_cache_peak: max(max_over_time(vllm:kv_cache_usage_perc[{{ bench_window }}]))
+      waiting_peak: max(max_over_time(vllm:num_requests_waiting[{{ bench_window }}]))
+      running_peak: max(max_over_time(vllm:num_requests_running[{{ bench_window }}]))
+      preemptions: sum(increase(vllm:num_preemptions_total[{{ bench_window }}]))
+      gpu_util_mean: avg(avg_over_time(DCGM_FI_DEV_GPU_UTIL[{{ bench_window }}]))
+
+- name: Collect the server-side figures
+  ansible.builtin.set_fact:
+    bench_server: >-
+      {{ bench_server | combine({item.item.key: (item.json.data.result[0].value[1] | float)
+                                 if item.json.data.result else None}) }}
+  loop: "{{ bench_prom.results }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+
+- name: Read the benchmark result
+  ansible.builtin.slurp:
+    src: "{{ lab_data }}/results/{{ vllm_variant }}/c{{ bench_c }}.json"
+  register: bench_raw
+
+- name: Save the run in the repository
+  ansible.builtin.copy:
+    content: >-
+      {{ {'variant': vllm_variant, 'concurrency': bench_c,
+          'bench': bench_raw.content | b64decode | from_json,
+          'server': bench_server} | to_nice_json }}
+    dest: "{{ playbook_dir }}/../results/{{ vllm_variant }}/c{{ bench_c }}.json"
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"

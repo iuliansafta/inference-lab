@@ -1,0 +1,10 @@
+.env
+.secrets/
+terraform/.terraform/
+terraform/*.tfvars
+terraform/*.tfstate
+terraform/*.tfstate.*
+*.retry
+__pycache__/
+.ansible/
+*.local.md

@@ -1,0 +1,10 @@
+---
+- name: Deploy the vLLM server for this variant
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'vllm.yml.j2') | from_yaml_all | list }}"
+
+# Rollout status, not the Available condition: after a variant change the old
+# pod still reports Available until the Recreate rollout tears it down.
+- name: Wait for the model to load
+  ansible.builtin.command: k3s kubectl -n inference rollout status deployment/vllm --timeout=1800s
+  changed_when: false
