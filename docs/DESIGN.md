@@ -1,6 +1,6 @@
 # Design
 
-Why the lab is built the way it is, what was checked while building it, and what is still open. Written on 2026-11-03, before the first run on hardware.
+Why the lab is built the way it is, what was checked while building it, and what the first run answered. Written on 2026-11-03, and updated after the first run on hardware on 2026-11-06.
 
 ## Goal
 
@@ -12,7 +12,7 @@ The output is a results table and a short write-up, not a production service. Ev
 
 | Decision | Why |
 |---|---|
-| Scaleway `L4-1-24G` in `fr-par-1` | €0.79 per hour, billed per minute, European provider. One NVIDIA L4 (Ada, 24 GB) supports bf16 and fp8. |
+| Scaleway `L4-1-24G` in `pl-waw-2` | €0.79 per hour, billed per minute, European provider. The lab started in `fr-par-1`, and moved because Scaleway's API reported `shortage` there and `scarce` in `pl-waw-2` on 2026-11-06. One NVIDIA L4 (Ada, 24 GB) supports bf16 and fp8. |
 | Mistral 7B Instruct v0.3 | Not gated on Hugging Face, so no token is needed. Made by a European company. Fits a 24 GB card in bf16 with room left for KV cache. |
 | k3s set up by Ansible, not Scaleway's managed Kubernetes (Kapsule) | Provisioning the GPU node from code is part of what the lab shows. Kapsule would hide it. |
 | Default runtime stays runc; GPU pods set `runtimeClassName: nvidia` | Explicit per pod. k3s creates the `nvidia` RuntimeClass when it finds the NVIDIA toolkit at startup. |
@@ -32,7 +32,7 @@ This is arithmetic, not a measurement.
 - The L4 has about 22.5 GiB usable. At `--gpu-memory-utilization 0.90` vLLM may use about 20 GiB. The weights take about 13.5 GiB, and activations and CUDA graphs take another 1 to 2 GiB.
 - That leaves about 5 GiB of cache, so about 40k tokens. At 512 + 256 tokens per request, that is roughly 50 requests at once.
 
-vLLM logs its real cache size at startup (`KV cache size`, `Maximum concurrency`). `make verify` prints those lines. Record them with the results.
+vLLM logs its real cache size at startup (`KV cache size`, `Maximum concurrency`), and `make verify` prints those lines. The first run logged 45,136 tokens with `--max-model-len 8192`, and 45,120 with 32768. That is about 5.5 GiB at 128 KiB per token, slightly above this estimate. The committed `bf16` table was measured with 8192 and wasn't re-run with 32768.
 
 ## Checked while building
 
@@ -44,17 +44,21 @@ Checked against the source on 2026-11-03:
 - **Scaleway.** The image `ubuntu_noble_gpu_os_13_nvidia` accepts `L4-1-24G` in `fr-par-1`, according to the marketplace API. Terraform provider 2.89.0 validates. Scaleway's tutorials log in as `root`.
 - **Repository.** `make syntax`, `make lint` (ansible-lint production profile, yamllint, terraform fmt) and `make test` pass.
 
-## Open until the first run
+## What the first run answered
 
-- Whether the benchmark Job works under the nvidia runtime without a GPU limit.
+The first run covered `bf16` only. It answered two questions:
+
+- The benchmark Job works under the nvidia runtime without a GPU limit. All five concurrency levels finished with 0 failed requests.
+- The GPU image ships the NVIDIA container toolkit, so the role skipped its install.
+
+These questions are still open:
+
 - Whether `--quantization fp8` starts on the L4. `fp8-kv` is the fallback.
-- Whether the GPU image ships the NVIDIA container toolkit. The role installs it if missing.
-- Whether a second `make apply` reports `changed=0`.
+- Whether a second `make apply` reports `changed=0`. Each repeat apply on that machine also carried a change to a role, so none of them answers this.
 - Whether a new Scaleway account needs a GPU quota increase or a deposit. The pricing page does not say.
 
 ## Next
 
-1. Run the full loop for `bf16`, `fp8` and `fp8-kv`, then commit `results/`.
-2. Record vLLM's startup cache size next to the estimate above, and explain any gap.
-3. Write up where each variant saturates and why, with Grafana screenshots.
-4. Serve the same model through Ray Serve on KubeRay and run the same benchmark. Many LLM platforms put Ray Serve in front of vLLM to manage replicas, so the comparison shows what that layer costs in latency and what its metrics add or hide. Start this after the `bf16` run works, not before.
+1. Run the full loop for `fp8` and `fp8-kv`, then commit `results/`.
+2. Write up where each variant saturates and why, with Grafana screenshots.
+3. Serve the same model through Ray Serve on KubeRay and run the same benchmark. Many LLM platforms put Ray Serve in front of vLLM to manage replicas, so the comparison shows what that layer costs in latency and what its metrics add or hide.

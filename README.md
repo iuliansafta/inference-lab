@@ -2,15 +2,15 @@
 
 A one-GPU lab that serves an open-weights model with [vLLM](https://docs.vllm.ai) on k3s, monitors it with Prometheus, Grafana and NVIDIA's DCGM exporter, and benchmarks it to find where it saturates and why.
 
-It runs on one Scaleway `L4-1-24G` instance in Paris (an NVIDIA L4, 24 GB). The model is Mistral 7B Instruct v0.3.
+It runs on one Scaleway `L4-1-24G` instance in Warsaw (`pl-waw-2`), an NVIDIA L4 with 24 GB. The model is Mistral 7B Instruct v0.3.
 
-> **Status:** syntax-checked, linted and template-rendered, but not yet run on the GPU. The first `make apply` on the instance is the real test.
+> **Status:** the lab ran on the GPU on 2026-11-06. The `bf16` results are in [`results/`](results/README.md). The `fp8` and `fp8-kv` variants haven't run.
 
 ## What the benchmark answers
 
 `make bench` runs `vllm bench serve` at concurrency 1, 8, 32, 64 and 128 (512 prompt tokens, 256 output tokens). For each run it saves the client's view: throughput, time to first token, time per output token and end-to-end latency. It also asks Prometheus for the server's view of the same window: peak KV cache use, peak running and waiting requests, preemptions and mean GPU utilisation.
 
-So the row where latency jumps also shows the cause. On a 24 GB card the expected limit is the KV cache. Once the cache is full, new requests wait for a batch slot and time to first token climbs. `make verify` prints vLLM's own KV cache sizing from its startup log.
+So the row where latency jumps also shows the cause. On a 24 GB card the expected limit is the KV cache. Once the cache is full, new requests wait for a batch slot and time to first token climbs. The `bf16` run matched this: the cache reached 100% at concurrency 64, and output throughput went only from 483 to 490 tokens per second between concurrency 64 and 128. `make verify` prints vLLM's own KV cache sizing from its startup log.
 
 Variants compare serving configurations on the same card:
 
@@ -31,6 +31,7 @@ The instance costs €0.79 per hour (Scaleway's price list, November 2026). A wo
 - Terraform 1.9 or later, ansible-core, `make`, and Python 3 (for the report).
 - The public half of your SSH key in `keys/lab.pub`. Terraform registers it with the project, and Scaleway installs it for `root` at first boot. Scaleway's own tutorials log in as `root`. SSH goes through the Proton Pass agent (`~/.ssh/proton-pass-agent.sock`), which serves the keys in the `SSH Keys` vault.
 - GPU quota on the Scaleway project. Check the console's quotas page first.
+- L4 stock in your zone, which changes from day to day. `zone` defaults to `pl-waw-2`, and you can set another one in `terraform/terraform.tfvars`.
 
 ## Run it
 

@@ -1,6 +1,6 @@
 variable "zone" {
   type    = string
-  default = "fr-par-1"
+  default = "pl-waw-2"
 }
 
 variable "instance_type" {
