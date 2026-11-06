@@ -11,6 +11,9 @@
     wait: true
     values:
       runtimeClassName: nvidia
+      # The chart's default affinity requires labels from Node Feature Discovery,
+      # which isn't installed. It leaves the DaemonSet at 0 pods, and `wait` still passes.
+      affinity: null
 
 # Selectors are opened up so that ServiceMonitors and rules from other releases
 # (dcgm-exporter, the vllm role) are picked up without a `release` label.
@@ -74,6 +77,8 @@
       serviceMonitor:
         enabled: true
         interval: 5s
+        # The chart's 25s default is above the interval, and the operator then skips this monitor.
+        scrapeTimeout: 5s
 
 # vLLM's own dashboard, vendored from examples/observability/prometheus_grafana
 # at the pinned vLLM tag. The Grafana sidecar loads any ConfigMap with this label.
