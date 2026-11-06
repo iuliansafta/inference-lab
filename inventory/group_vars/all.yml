@@ -13,9 +13,9 @@ k8s_kubeconfig: /etc/rancher/k3s/k3s.yaml
 lab_data: /var/lib/inference-lab
 
 vllm_model: mistralai/Mistral-7B-Instruct-v0.3
-# Mistral's default is 32k tokens. One sequence that long would claim most of
-# the KV cache left on a 24 GB card, so the server is capped at 8k.
-vllm_max_model_len: 8192
+# Mistral's own limit. ARC prompts reach 16,371 tokens before the 4,096 sampled,
+# and vLLM refuses a request that doesn't fit, so a lower cap loses those tasks.
+vllm_max_model_len: 32768
 vllm_gpu_memory_utilization: 0.90
 # Extra `vllm serve` flags per serving configuration. Pick one with
 # `make apply VARIANT=fp8`; results land in results/<variant>/.

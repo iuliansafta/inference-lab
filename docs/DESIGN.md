@@ -17,7 +17,7 @@ The output is a results table and a short write-up, not a production service. Ev
 | k3s set up by Ansible, not Scaleway's managed Kubernetes (Kapsule) | Provisioning the GPU node from code is part of what the lab shows. Kapsule would hide it. |
 | Default runtime stays runc; GPU pods set `runtimeClassName: nvidia` | Explicit per pod. k3s creates the `nvidia` RuntimeClass when it finds the NVIDIA toolkit at startup. |
 | Deployment strategy `Recreate` | There is one GPU. The old pod must release it before the new one starts. |
-| `--max-model-len 8192` | Mistral's default is 32k tokens. Capping it keeps one long sequence from claiming most of the cache. |
+| `--max-model-len 32768` | Mistral's own limit. An 8k cap would have refused 30 of the first 100 ARC-AGI-1 evaluation tasks, whose prompts plus 4,096 sampled tokens don't fit. A long prompt can claim most of the KV cache, but samples of one prompt share its blocks. |
 | Benchmark runs inside the cluster as a Job, from the same vLLM image | No network between client and server distorts latency, and the client version matches the server. |
 | Prometheus queries per run window, 5s scrape interval | `vllm bench serve` sees only the client side. The server-side peaks (KV cache, waiting requests, preemptions) for the same window explain where latency jumps. Without a short scrape interval a two-minute run has too few samples. |
 | Concurrency 1, 8, 32, 64, 128 | 64 and 128 are above the estimated cache capacity (next section), so the saturation point falls inside the sweep. |
