@@ -38,7 +38,7 @@ vLLM logs its real cache size at startup (`KV cache size`, `Maximum concurrency`
 
 Checked against the source on 2026-11-03:
 
-- **vLLM v0.32.0.** Metric names from `vllm/v1/metrics/loggers.py`. Counters get `_total` in Prometheus. `vllm bench serve` flags and the result keys (`request_throughput`, `output_throughput`, `p<N>_<metric>_ms`, `failed`) from `vllm/benchmarks/serve.py`. The `random` dataset does not need pandas or datasets, which the image does not install. The image entrypoint is `vllm serve`. The dashboard was vendored from `examples/observability/prometheus_grafana/grafana.json`.
+- **vLLM v0.32.0.** Metric names come from `vllm/v1/metrics/loggers.py`. Counters get `_total` in Prometheus. `vllm bench serve` flags and the result keys (`request_throughput`, `output_throughput`, `p<N>_<metric>_ms`, `failed`) come from `vllm/benchmarks/serve.py`. The `random` dataset does not need pandas or datasets, which the image does not install. The image entrypoint is `vllm serve`. The dashboard was vendored from `examples/observability/prometheus_grafana/grafana.json`.
 - **Helm charts.** `nvidia-device-plugin` 0.20.1, `dcgm-exporter` 4.8.4 and `kube-prometheus-stack` 92.17.1 were rendered with `helm template` and the role's values.
 - **k3s.** NVIDIA runtime detection and RuntimeClasses follow the k3s documentation, section "NVIDIA Container Runtime". The pinned version is v1.37.1+k3s1.
 - **Scaleway.** The image `ubuntu_noble_gpu_os_13_nvidia` accepts `L4-1-24G` in `fr-par-1`, according to the marketplace API. Terraform provider 2.89.0 validates. Scaleway's tutorials log in as `root`.

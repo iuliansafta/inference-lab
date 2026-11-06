@@ -8,9 +8,9 @@ It runs on one Scaleway `L4-1-24G` instance in Paris (an NVIDIA L4, 24 GB). The 
 
 ## What the benchmark answers
 
-`make bench` runs `vllm bench serve` at concurrency 1, 8, 32, 64 and 128 (512 prompt tokens, 256 output tokens). For each run it saves the client's view (throughput, time to first token, time per output token, end-to-end latency) and asks Prometheus for the server's view of the same window: peak KV cache use, peak running and waiting requests, preemptions and mean GPU utilisation.
+`make bench` runs `vllm bench serve` at concurrency 1, 8, 32, 64 and 128 (512 prompt tokens, 256 output tokens). For each run it saves the client's view: throughput, time to first token, time per output token and end-to-end latency. It also asks Prometheus for the server's view of the same window: peak KV cache use, peak running and waiting requests, preemptions and mean GPU utilisation.
 
-So the row where latency jumps also shows the cause. On a 24 GB card the expected limit is the KV cache: once it is full, new requests wait for a batch slot and time to first token climbs. `make verify` prints vLLM's own KV cache sizing from its startup log.
+So the row where latency jumps also shows the cause. On a 24 GB card the expected limit is the KV cache. Once the cache is full, new requests wait for a batch slot and time to first token climbs. `make verify` prints vLLM's own KV cache sizing from its startup log.
 
 Variants compare serving configurations on the same card:
 
@@ -29,7 +29,7 @@ The instance costs €0.79 per hour (Scaleway's price list, November 2026). A wo
 - A Scaleway API key in `.env` or the environment: `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_PROJECT_ID`. The Makefile loads `.env`, which is git-ignored.
 - Your own address in `terraform/terraform.tfvars`, also git-ignored: `ssh_allowed_cidr = "203.0.113.7/32"`. Only this address can reach port 22. If your address changes, update the file and run `make infra` again.
 - Terraform 1.9 or later, ansible-core, `make`, and Python 3 (for the report).
-- The public half of your SSH key in `keys/lab.pub`. Terraform registers it with the project, and Scaleway installs it for `root` at first boot; Scaleway's own tutorials log in as `root`. SSH goes through the Proton Pass agent (`~/.ssh/proton-pass-agent.sock`), which serves the keys in the `SSH Keys` vault.
+- The public half of your SSH key in `keys/lab.pub`. Terraform registers it with the project, and Scaleway installs it for `root` at first boot. Scaleway's own tutorials log in as `root`. SSH goes through the Proton Pass agent (`~/.ssh/proton-pass-agent.sock`), which serves the keys in the `SSH Keys` vault.
 - GPU quota on the Scaleway project. Check the console's quotas page first.
 
 ## Run it
@@ -52,23 +52,23 @@ make destroy
 
 `make tunnel` prints the Grafana admin password, which Ansible generates into `.secrets/grafana-admin`. Grafana has two dashboards: vLLM's own (vendored from the vLLM repository at the pinned tag) and NVIDIA's DCGM exporter dashboard.
 
-Alerts are defined in `roles/vllm/templates/vllm.yml.j2`: server down, requests queueing, KV cache over 90%, preemptions, and GPU temperature. They show in Prometheus and Alertmanager; no receiver is configured.
+`roles/vllm/templates/vllm.yml.j2` defines the alerts: server down, requests queueing, KV cache over 90%, preemptions, and GPU temperature. They show in Prometheus and Alertmanager. No receiver is configured.
 
 ## Layout
 
 | Path | Contents |
 |---|---|
 | `terraform/` | The Scaleway instance, its IP, security group and SSH key. |
-| `roles/nvidia` | Requires a working driver (the image ships it); installs the container toolkit if missing. |
+| `roles/nvidia` | Requires a working driver, which the image ships. Installs the container toolkit if missing. |
 | `roles/k3s` | k3s, helm, and the Python client the `kubernetes.core` modules need. |
 | `roles/monitoring` | NVIDIA device plugin, DCGM exporter, kube-prometheus-stack, the vLLM dashboard. |
 | `roles/vllm` | The vLLM Deployment, Service, ServiceMonitor and alert rules. |
 | `roles/bench` | One benchmark Job per concurrency level, plus the Prometheus queries for its window. |
-| `scripts/report.py` | Results to Markdown tables. Tested in `tests/`. |
+| `scripts/report.py` | Turns results into Markdown tables. Tested in `tests/`. |
 | `playground/ray/` | Laptop-sized Ray and Ray Serve exercises (CPU only), to learn what Ray adds before it goes in front of vLLM. |
 | `results/` | Committed benchmark results. |
 
-Every version is pinned in `inventory/group_vars/all.yml`, and `make preflight` rejects anything that is not an exact release.
+`inventory/group_vars/all.yml` pins every version, and `make preflight` rejects anything that is not an exact release.
 
 ## Checks
 

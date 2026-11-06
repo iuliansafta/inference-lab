@@ -1,6 +1,6 @@
 # Ray playground
 
-Three small scripts to learn what Ray does before the lab puts Ray Serve in front of vLLM. Everything runs on a laptop CPU, with no GPU and no cluster. `uv` installs Ray 2.59.0 the first time a script runs; each script declares its own dependencies.
+Three small scripts to learn what Ray does before the lab puts Ray Serve in front of vLLM. Everything runs on a laptop CPU, with no GPU and no cluster. `uv` installs Ray 2.59.0 the first time a script runs. Each script declares its own dependencies.
 
 Run the scripts from this directory. Ray packages the current directory for its workers, so starting from the repository root would copy the whole repository into Ray's object store.
 
@@ -72,7 +72,7 @@ Try this (stop the server with Ctrl+C between runs):
            32 |  2.30s |  3.31s |        4 | 32 32 32 32
   ```
 
-  The 9.8-second p95 in the second row is the cost of scaling up while requests wait. A fake replica starts in a second. A real LLM replica must load gigabytes of weights onto a GPU first, which takes minutes, so many LLM deployments fix the replica count to the number of GPUs instead of autoscaling.
+  The 9.8-second p95 in the second row is the cost of scaling up while requests wait. A fake replica starts in a second. A real LLM replica must first load gigabytes of weights onto a GPU, and that takes minutes. So many LLM deployments fix the replica count to the number of GPUs instead of autoscaling.
 - Wait 30 seconds without traffic, then run `uv run load.py 1`. Serve has started to remove replicas.
 
 ## How the fake maps to a real deployment
@@ -89,7 +89,7 @@ The last row is the question for the lab's Ray phase. If Serve caps a replica be
 
 ## Cleanup
 
-Ctrl+C stops the server and its Ray cluster. Serve prints a `KeyboardInterrupt` traceback when it stops; that is expected. If a Ray process is left over:
+Ctrl+C stops the server and its Ray cluster. Serve prints a `KeyboardInterrupt` traceback when it stops. That is expected. If a Ray process is left over:
 
 ```sh
 uv run --with 'ray[serve]==2.59.0' ray stop --force
